@@ -20,8 +20,10 @@ function safeName(value) {
   return String(value || '未命名').replace(/[\\/\x00-\x1f\x7f<>:"|?*]/g, '_').replace(/^\.+$/, '_').slice(0, 180).trim() || '未命名'
 }
 
-function publicShare(item) {
-  return { id: item.id, type: item.type, name: item.name, size: item.size || 0, createdAt: item.createdAt, status: item.status || 'active' }
+function publicShare(item, includeDownloadToken = false) {
+  const value = { id: item.id, type: item.type, name: item.name, size: item.size || 0, createdAt: item.createdAt, status: item.status || 'active' }
+  if (includeDownloadToken && item.type === 'file') value.downloadToken = item.downloadToken
+  return value
 }
 
 function json(res, code, value) {
@@ -89,6 +91,11 @@ class LocalDrop {
     let saved = {}
     try { saved = JSON.parse(fs.readFileSync(this.file, 'utf8')) } catch (error) { if (error.code !== 'ENOENT') throw error }
     this.state = { settings: { port: 43881, ip: addresses()[0]?.address || '127.0.0.1', autoStart: false, allowUpload: false, passwordHash: null, ...saved.settings }, shares: saved.shares || [] }
+    let changed = false
+    for (const item of this.state.shares) {
+      if (item.type === 'file' && !item.downloadToken) { item.downloadToken = crypto.randomBytes(24).toString('hex'); changed = true }
+    }
+    if (changed) this.persist()
     this.server = null
     this.sessions = new Map()
     this.attempts = new Map()
@@ -110,7 +117,7 @@ class LocalDrop {
           else size = item.type === 'file' ? stat.size : 0
         } catch { status = 'missing' }
       }
-      return publicShare({ ...item, status, size })
+      return publicShare({ ...item, status, size }, true)
     }))
     const { passwordHash, ...settings } = this.state.settings
     return { settings: { ...settings, hasPassword: !!passwordHash }, shares, running: !!this.server, addresses: addresses(), url: this.server ? `http://${settings.ip}:${settings.port}` : null }
@@ -131,7 +138,7 @@ class LocalDrop {
       const stat = await fsp.stat(sourcePath)
       const type = stat.isDirectory() ? 'directory' : stat.isFile() ? 'file' : null
       if (!type) throw new Error(`不支持此文件类型：${path.basename(sourcePath)}`)
-      const item = { id: crypto.randomUUID(), type, name: safeName(path.basename(sourcePath)), sourcePath, size: stat.isFile() ? stat.size : 0, createdAt: new Date().toISOString() }
+      const item = { id: crypto.randomUUID(), type, name: safeName(path.basename(sourcePath)), sourcePath, size: stat.isFile() ? stat.size : 0, downloadToken: type === 'file' ? crypto.randomBytes(24).toString('hex') : undefined, createdAt: new Date().toISOString() }
       this.state.shares.unshift(item)
       added.push(publicShare(item))
     }
@@ -238,10 +245,13 @@ class LocalDrop {
       return json(res, 200, { ok: true })
     }
     if (pathname.startsWith('/api/')) {
-      if (!this.authorized(req)) return json(res, 401, { error: '请先输入站点密码' })
+      const downloadRoute = /^\/api\/shares\/([a-f0-9-]+)\/download$/.exec(pathname)
+      const downloadItem = downloadRoute && this.state.shares.find(item => item.id === downloadRoute[1])
+      const hasDirectDownloadToken = downloadItem?.type === 'file' && downloadItem.downloadToken && url.searchParams.get('token') === downloadItem.downloadToken
+      if (!hasDirectDownloadToken && !this.authorized(req)) return json(res, 401, { error: '请先输入站点密码' })
       if (pathname === '/api/shares' && req.method === 'GET') {
         const snap = await this.snapshot()
-        return json(res, 200, { shares: snap.shares, allowUpload: snap.settings.allowUpload })
+        return json(res, 200, { shares: snap.shares.map(({ downloadToken, ...item }) => item), allowUpload: snap.settings.allowUpload })
       }
       if (pathname === '/api/uploads' && req.method === 'POST') return this.upload(req, res, url)
       const match = /^\/api\/shares\/([a-f0-9-]+)\/(content|browse|download)$/.exec(pathname)
@@ -255,6 +265,8 @@ class LocalDrop {
   async shareRequest(req, res, id, action, url) {
     const item = this.state.shares.find(x => x.id === id)
     if (!item) return json(res, 404, { error: '分享项不存在' })
+    const directDownload = action === 'download' && item.type === 'file' && item.downloadToken && url.searchParams.get('token') === item.downloadToken
+    if (!directDownload && !this.authorized(req)) return json(res, 401, { error: '请先输入站点密码' })
     if (item.type === 'text') {
       if (action !== 'content') return json(res, 400, { error: '文本只能查看' })
       return json(res, 200, { name: item.name, text: item.textContent })

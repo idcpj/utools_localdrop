@@ -41,3 +41,15 @@ test('upload saves into data uploads when enabled', async () => withDrop(async (
   assert.equal(upload.status, 201)
   assert.equal((await fs.readFile(path.join(root, 'data', 'uploads', 'note.txt'))).toString(), 'uploaded')
 }))
+
+test('file download token works without a session and is not exposed to visitors', async () => withDrop(async (drop, root, base) => {
+  const item = (await drop.addPaths([path.join(root, 'source', 'hello.txt')]))[0]
+  const token = drop.state.shares.find(share => share.id === item.id).downloadToken
+  let response = await fetch(`${base}/api/shares/${item.id}/download`)
+  assert.equal(response.status, 401)
+  response = await fetch(`${base}/api/shares/${item.id}/download?token=${token}`)
+  assert.equal(response.status, 200)
+  assert.equal(await response.text(), 'hello localdrop')
+  response = await fetch(`${base}/api/shares`)
+  assert.equal(response.status, 401)
+}))
