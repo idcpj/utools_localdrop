@@ -71,6 +71,55 @@ function decodeSegments(raw) {
   })
 }
 
+// A failed/interrupted GitHub download can leave a file that starts with MZ/PE
+// but is still not executable. Windows reports that case as "not a valid
+// application", so validate the PE layout before handing it to spawn().
+async function validWindowsExecutable(file) {
+  const stat = await fsp.stat(file).catch(() => null)
+  if (!stat?.isFile() || stat.size < 1024) return false
+  const handle = await fsp.open(file, 'r').catch(() => null)
+  if (!handle) return false
+  try {
+    const header = Buffer.alloc(Math.min(stat.size, 4096))
+    await handle.read(header, 0, header.length, 0)
+    if (header[0] !== 0x4d || header[1] !== 0x5a) return false
+    const peOffset = header.readUInt32LE(0x3c)
+    if (peOffset < 0x40 || peOffset + 24 > stat.size) return false
+    const required = peOffset + 24
+    if (required > header.length) {
+      const expanded = Buffer.alloc(Math.min(stat.size, required + 256))
+      await handle.read(expanded, 0, expanded.length, 0)
+      return validPeBuffer(expanded, stat.size)
+    }
+    return validPeBuffer(header, stat.size)
+  } finally {
+    await handle.close().catch(() => {})
+  }
+}
+
+function validPeBuffer(buffer, fileSize) {
+  const peOffset = buffer.readUInt32LE(0x3c)
+  if (peOffset + 24 > buffer.length || buffer.toString('ascii', peOffset, peOffset + 4) !== 'PE\0\0') return false
+  const machine = buffer.readUInt16LE(peOffset + 4)
+  const expectedMachine = process.arch === 'ia32' ? 0x14c : process.arch === 'arm64' ? 0xaa64 : 0x8664
+  if (machine !== expectedMachine) return false
+  const sections = buffer.readUInt16LE(peOffset + 6)
+  const optionalSize = buffer.readUInt16LE(peOffset + 20)
+  const optionalOffset = peOffset + 24
+  if (!sections || optionalOffset + optionalSize > buffer.length) return false
+  const optionalMagic = buffer.readUInt16LE(optionalOffset)
+  if ((machine === 0x14c && optionalMagic !== 0x10b) || (machine !== 0x14c && optionalMagic !== 0x20b)) return false
+  const sectionOffset = optionalOffset + optionalSize
+  if (sectionOffset + sections * 40 > buffer.length) return false
+  for (let index = 0; index < sections; index++) {
+    const offset = sectionOffset + index * 40
+    const rawSize = buffer.readUInt32LE(offset + 16)
+    const rawOffset = buffer.readUInt32LE(offset + 20)
+    if (rawSize && (rawOffset < 512 || rawOffset + rawSize > fileSize)) return false
+  }
+  return true
+}
+
 async function resolveShared(item, parts) {
   const root = await fsp.realpath(item.sourcePath)
   const rootStat = await fsp.stat(root)
@@ -227,10 +276,24 @@ class LocalDrop {
       const binName = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared'
       const executable = path.join(this.dataDir, 'bin', binName)
       await fsp.mkdir(path.dirname(executable), { recursive: true })
-      if (!fs.existsSync(executable)) await cloudflared.install(executable)
+      if (process.platform === 'win32' && !(await validWindowsExecutable(executable))) {
+        let installed = false
+        let lastInstallError = null
+        for (let attempt = 1; attempt <= 3 && !installed; attempt++) {
+          await fsp.rm(executable, { force: true })
+          try { await cloudflared.install(executable) } catch (error) { lastInstallError = error }
+          installed = await validWindowsExecutable(executable)
+        }
+        if (!installed && lastInstallError) throw new Error(`cloudflared 下载失败：${lastInstallError.message || lastInstallError}`)
+      } else if (!fs.existsSync(executable)) {
+        await cloudflared.install(executable)
+      }
       if (generation !== this.tunnelGeneration || !this.server) throw new Error('公网隧道启动已取消')
       const executableStat = await fsp.stat(executable).catch(() => null)
-      if (!executableStat?.isFile() || executableStat.size < 1024) throw new Error(`cloudflared 二进制不存在或损坏：${executable}`)
+      const validExecutable = process.platform === 'win32'
+        ? await validWindowsExecutable(executable)
+        : !!executableStat?.isFile() && executableStat.size >= 1024
+      if (!validExecutable) throw new Error(`cloudflared 二进制下载不完整或与当前系统不兼容，请重试：${executable}`)
       if (process.platform !== 'win32') await fsp.chmod(executable, 0o755).catch(() => {})
       const localUrl = `http://${this.state.settings.ip}:${this.state.settings.port}`
       const args = ['tunnel', '--url', localUrl]

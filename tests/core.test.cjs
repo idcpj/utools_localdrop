@@ -5,6 +5,21 @@ const os = require('node:os')
 const path = require('node:path')
 const { LocalDrop } = require('../server/core.cjs')
 
+function fakeWindowsExecutable() {
+  const buffer = Buffer.alloc(1024)
+  buffer.write('MZ', 0, 'ascii')
+  buffer.writeUInt32LE(128, 0x3c)
+  buffer.write('PE\0\0', 128, 'ascii')
+  buffer.writeUInt16LE(process.arch === 'ia32' ? 0x14c : process.arch === 'arm64' ? 0xaa64 : 0x8664, 132)
+  buffer.writeUInt16LE(1, 134)
+  buffer.writeUInt16LE(process.arch === 'ia32' ? 0xe0 : 0xf0, 148)
+  buffer.writeUInt16LE(process.arch === 'ia32' ? 0x10b : 0x20b, 152)
+  const section = 152 + (process.arch === 'ia32' ? 0xe0 : 0xf0)
+  buffer.writeUInt32LE(512, section + 16)
+  buffer.writeUInt32LE(512, section + 20)
+  return buffer
+}
+
 async function withDrop(fn) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'localdrop-'))
   const source = path.join(root, 'source')
@@ -61,10 +76,40 @@ test('public tunnel requires a site password', async () => {
   await fs.rm(root, { recursive: true, force: true })
 })
 
+test('public tunnel replaces a truncated Windows executable cache', async () => {
+  if (process.platform !== 'win32') return
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'localdrop-corrupt-bin-'))
+  const executable = path.join(root, 'data', 'bin', 'cloudflared.exe')
+  await fs.mkdir(path.dirname(executable), { recursive: true })
+  await fs.writeFile(executable, fakeWindowsExecutable().subarray(0, 700))
+  let installs = 0
+  const fakeCloudflared = {
+    install: async target => { installs++; await fs.writeFile(target, fakeWindowsExecutable()) },
+  }
+  const { EventEmitter } = require('node:events')
+  const spawnImpl = () => {
+    const child = new EventEmitter()
+    child.killed = false
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = () => { child.killed = true; child.emit('exit', 0, 'SIGINT') }
+    queueMicrotask(() => { child.emit('spawn'); setTimeout(() => child.stdout.emit('data', 'https://repaired.trycloudflare.com\n'), 5) })
+    return child
+  }
+  const drop = new LocalDrop({ dataDir: path.join(root, 'data'), siteDir: path.resolve(__dirname, '../dist'), cloudflaredModule: fakeCloudflared, spawnImpl })
+  await drop.updateSettings({ ip: '127.0.0.1', port: 47890, password: 'secret123' })
+  drop.server = { closeAllConnections() {}, close(callback) { callback() } }
+  const snapshot = await drop.startTunnel()
+  assert.equal(installs, 1)
+  assert.equal(snapshot.tunnel.url, 'https://repaired.trycloudflare.com')
+  await drop.stop()
+  await fs.rm(root, { recursive: true, force: true })
+})
+
 test('public tunnel reports spawn errors instead of UNKNOWN', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'localdrop-spawn-'))
   const fakeCloudflared = {
-    install: async executable => { await fs.writeFile(executable, Buffer.alloc(2048)) },
+    install: async executable => { await fs.writeFile(executable, fakeWindowsExecutable()) },
   }
   const drop = new LocalDrop({
     dataDir: path.join(root, 'data'),
@@ -92,7 +137,7 @@ test('public tunnel reports spawn errors instead of UNKNOWN', async () => {
 test('public tunnel retries Windows spawn UNKNOWN with shell fallback', async () => {
   if (process.platform !== 'win32') return
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'localdrop-spawn-fallback-'))
-  const fakeCloudflared = { install: async executable => { await fs.writeFile(executable, Buffer.alloc(2048)) } }
+  const fakeCloudflared = { install: async executable => { await fs.writeFile(executable, fakeWindowsExecutable()) } }
   let calls = 0
   let fallbackArgs
   const { EventEmitter } = require('node:events')
@@ -125,7 +170,7 @@ test('public tunnel retries Windows spawn UNKNOWN with shell fallback', async ()
 test('public tunnel handles synchronous Windows spawn UNKNOWN', async () => {
   if (process.platform !== 'win32') return
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'localdrop-spawn-sync-'))
-  const fakeCloudflared = { install: async executable => { await fs.writeFile(executable, Buffer.alloc(2048)) } }
+  const fakeCloudflared = { install: async executable => { await fs.writeFile(executable, fakeWindowsExecutable()) } }
   let calls = 0
   const { EventEmitter } = require('node:events')
   const spawnImpl = (executable, args) => {
