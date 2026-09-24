@@ -25,8 +25,17 @@ function App() {
   async function loadShares() {
     const data = await get('/api/shares')
     setShares(data.shares); setAllowUpload(data.allowUpload)
-    const id = new URLSearchParams(location.search).get('share')
-    if (id) { const item = data.shares.find(x => x.id === id); if (item) open(item) }
+    const params = new URLSearchParams(location.search)
+    const shareId = params.get('share')
+    const downloadId = params.get('download')
+    if (downloadId) {
+      const item = data.shares.find(x => x.id === downloadId)
+      if (item?.type === 'file') {
+        window.setTimeout(() => { window.location.assign(contentUrl(item.id, 'download')) }, 0)
+        return
+      }
+    }
+    if (shareId) { const item = data.shares.find(x => x.id === shareId); if (item) open(item) }
   }
   useEffect(() => { get('/api/auth/status').then(data => { setAuth(data); if (data.authenticated) loadShares().catch(e => setError(e.message)) }).catch(e => setError(e.message)) }, [])
 

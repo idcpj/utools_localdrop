@@ -54,6 +54,7 @@ window.localdrop = {
   chooseFiles: () => utoolsApi?.showOpenDialog?.({ properties: ['openFile', 'multiSelections'] }) || [],
   chooseFolder: () => utoolsApi?.showOpenDialog?.({ properties: ['openDirectory'] }) || [],
   copy: value => utoolsApi?.copyText?.(value),
+  openUrl: value => utoolsApi?.shellOpenExternal ? utoolsApi.shellOpenExternal(value) : window.open(value, '_blank'),
 }
 
 if (drop.state.settings.autoStart) drop.start().catch(error => { window.localdrop.startError = error.message })
