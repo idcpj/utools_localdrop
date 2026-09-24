@@ -1,0 +1,10 @@
+{
+  "main": "index.html",
+  "logo": "logo.png",
+  "preload": "plugin.js",
+  "features": [
+    { "code": "localdrop", "explain": "局域网分享", "cmds": ["局域网分享", "localdrop"] },
+    { "code": "share-files", "explain": "分享文件或文件夹", "cmds": [{ "type": "files", "label": "分享文件或文件夹" }] },
+    { "code": "share-text", "explain": "分享选中文本", "cmds": [{ "type": "over", "label": "分享选中文本" }] }
+  ]
+}

@@ -1,0 +1,33 @@
+# LocalDrop
+
+基于 React、Tailwind CSS 和 Node.js 的 uTools 局域网分享插件。
+
+## 开发
+
+```bash
+npm install
+npm run dev
+```
+
+## 构建
+
+```bash
+npm run build
+```
+
+构建完成后，`dist/` 是完整的可安装 uTools 插件目录，直接在 uTools 开发者工具中选择该目录即可安装。目录内包含 `plugin.json`、`index.html`、`site.html`、`logo.png`、`plugin.js`、`preload.js`、`package.json`、`server/` 和构建后的静态资源。
+
+## 验证
+
+```bash
+npm test
+```
+
+测试覆盖站点密码、分享列表、文件夹浏览、文件下载和上传保存。
+
+## 使用约定
+
+- 文件与目录分享引用原始路径，不复制源文件。
+- 网页上传默认关闭，开启后保存到插件数据目录的 `uploads/`。
+- 服务仅在 uTools 运行期间提供，停止服务或退出 uTools 后局域网访问会中断。
+- 根目录密码是全站统一密码，密码以哈希形式保存。
