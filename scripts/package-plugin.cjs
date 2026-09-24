@@ -61,6 +61,11 @@ async function main() {
   await copy(path.join(root, 'logo.svg'), path.join(dist, 'logo.svg'))
   await fsp.writeFile(path.join(dist, 'logo.png'), logoPng())
   await fsp.cp(path.join(root, 'server'), path.join(dist, 'server'), { recursive: true, force: true })
+  const cloudflaredDir = path.join(root, 'node_modules', 'cloudflared')
+  const packagedCloudflared = path.join(dist, 'node_modules', 'cloudflared')
+  await fsp.mkdir(packagedCloudflared, { recursive: true })
+  await copy(path.join(cloudflaredDir, 'package.json'), path.join(packagedCloudflared, 'package.json'))
+  await fsp.cp(path.join(cloudflaredDir, 'lib'), path.join(packagedCloudflared, 'lib'), { recursive: true, force: true })
 
   // uTools loads the preload entry from the plugin package root. Keep both names
   // because older local plugin templates use preload.js while this project uses plugin.js.

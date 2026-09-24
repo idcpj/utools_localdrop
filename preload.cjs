@@ -39,6 +39,10 @@ utoolsApi?.onPluginEnter?.(({ code, type, payload }) => {
   }
 })
 
+utoolsApi?.onPluginOut?.(() => {
+  drop.stop().catch(() => {})
+})
+
 window.localdrop = {
   snapshot: () => drop.snapshot(),
   start: () => drop.start(),
@@ -55,6 +59,8 @@ window.localdrop = {
   chooseFolder: () => utoolsApi?.showOpenDialog?.({ properties: ['openDirectory'] }) || [],
   copy: value => utoolsApi?.copyText?.(value),
   openUrl: value => utoolsApi?.shellOpenExternal ? utoolsApi.shellOpenExternal(value) : window.open(value, '_blank'),
+  startTunnel: () => drop.startTunnel(),
+  stopTunnel: () => drop.stopTunnel(),
 }
 
 if (drop.state.settings.autoStart) drop.start().catch(error => { window.localdrop.startError = error.message })

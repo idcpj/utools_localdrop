@@ -20,6 +20,7 @@ function App() {
   const [text, setText] = useState('')
   const [query, setQuery] = useState('')
   const [upload, setUpload] = useState(null)
+  const [download, setDownload] = useState(null)
   const inputRef = useRef(null)
 
   async function loadShares() {
@@ -54,6 +55,33 @@ function App() {
   }
   async function browse(next) { setError(''); try { const data = await get(contentUrl(selected.id, 'browse', next)); setParts(next); setEntries(data.entries) } catch (e) { setError(e.message) } }
   function back() { setSelected(null); setParts([]); setText(''); history.replaceState(null, '', '/') }
+  async function downloadFile(url, name) {
+    setError('')
+    setDownload({ name, loaded: 0, total: 0, progress: 0 })
+    try {
+      const response = await fetch(url, { credentials: 'same-origin' })
+      if (!response.ok) { const value = await response.json().catch(() => ({})); throw new Error(value.error || '下载失败') }
+      const total = Number(response.headers.get('content-length')) || 0
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('当前浏览器不支持流式下载')
+      const chunks = []
+      let loaded = 0
+      while (true) {
+        const part = await reader.read()
+        if (part.done) break
+        chunks.push(part.value)
+        loaded += part.value.byteLength
+        setDownload({ name, loaded, total, progress: total ? Math.round(loaded / total * 100) : 0 })
+      }
+      const blob = new Blob(chunks)
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = name
+      link.click()
+      URL.revokeObjectURL(link.href)
+      setDownload({ name, loaded, total: total || loaded, progress: 100, done: true })
+    } catch (e) { setError(e.message); setDownload(null) }
+  }
   function uploadFiles(files) {
     if (!files?.length || !allowUpload) return
     const queue = Array.from(files)
@@ -80,9 +108,11 @@ function App() {
   {error && <div role="alert" className="mb-5 rounded-xl border border-rose-300/20 bg-rose-300/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
   {selected ? <><div className="mb-5 flex flex-wrap items-center gap-2 text-sm"><button className="btn btn-ghost px-2" onClick={back}><ArrowLeft size={16}/> 全部分享</button>{parts.map((part, i) => <React.Fragment key={i}><span className="text-slate-600">/</span><button className="text-slate-300 hover:text-emerald-200" onClick={() => browse(parts.slice(0, i + 1))}>{part}</button></React.Fragment>)}</div>
     {selected.type === 'text' && <section className="glass rounded-2xl p-6"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 font-semibold"><FileText size={18} className="text-violet-200"/> 文本内容</div><button className="btn btn-secondary text-sm" onClick={async () => { await navigator.clipboard.writeText(text); setError('已复制文本') }}><Copy size={15}/> 复制</button></div><pre className="whitespace-pre-wrap break-words rounded-xl bg-[#121728] p-5 font-sans text-sm leading-7 text-slate-200">{text}</pre></section>}
-    {selected.type === 'file' && <section className="glass flex flex-col items-center rounded-2xl p-10 text-center"><File size={44} className="mb-5 text-sky-200"/><h2 className="break-all text-lg font-semibold">{selected.name}</h2><p className="mt-2 text-sm text-slate-400">{size(selected.size)}{selected.status !== 'active' ? ' · 源文件已失效' : ''}</p><a className="btn btn-primary mt-6" href={contentUrl(selected.id, 'download')}><Download size={17}/> 下载文件</a></section>}
-    {selected.type === 'directory' && <section className="glass overflow-hidden rounded-2xl">{entries.length ? entries.map(entry => { const isDir = entry.type === 'directory'; const next = [...parts, entry.name]; return <div key={entry.name} className="flex items-center gap-3 border-b border-white/[.06] px-4 py-4 last:border-0"><div className={`flex h-10 w-10 flex-none items-center justify-center rounded-xl ${isDir ? 'bg-amber-200/10 text-amber-200' : 'bg-sky-200/10 text-sky-200'}`}>{isDir ? <Folder size={20}/> : <File size={20}/>}</div><div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{entry.name}</div><div className="mt-1 text-xs text-slate-400">{isDir ? '文件夹' : size(entry.size)}</div></div>{isDir ? <button className="btn btn-ghost px-2" onClick={() => browse(next)}><ArrowRight size={17}/></button> : <a className="btn btn-ghost px-2" href={contentUrl(selected.id, 'download', next)} download><Download size={17}/></a>}</div> }) : <div className="p-12 text-center text-sm text-slate-400">此文件夹为空</div>}</section>}
+    {selected.type === 'file' && <section className="glass flex flex-col items-center rounded-2xl p-10 text-center"><File size={44} className="mb-5 text-sky-200"/><h2 className="break-all text-lg font-semibold">{selected.name}</h2><p className="mt-2 text-sm text-slate-400">{size(selected.size)}{selected.status !== 'active' ? ' · 源文件已失效' : ''}</p><button className="btn btn-primary mt-6" disabled={!!download && !download.done} onClick={() => downloadFile(contentUrl(selected.id, 'download'), selected.name)}><Download size={17}/> {download?.done ? '重新下载' : '下载文件'}</button></section>}
+    {selected.type === 'directory' && <section className="glass overflow-hidden rounded-2xl">{entries.length ? entries.map(entry => { const isDir = entry.type === 'directory'; const next = [...parts, entry.name]; return <div key={entry.name} className="flex items-center gap-3 border-b border-white/[.06] px-4 py-4 last:border-0"><div className={`flex h-10 w-10 flex-none items-center justify-center rounded-xl ${isDir ? 'bg-amber-200/10 text-amber-200' : 'bg-sky-200/10 text-sky-200'}`}>{isDir ? <Folder size={20}/> : <File size={20}/>}</div><div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{entry.name}</div><div className="mt-1 text-xs text-slate-400">{isDir ? '文件夹' : size(entry.size)}</div></div>{isDir ? <button className="btn btn-ghost px-2" onClick={() => browse(next)}><ArrowRight size={17}/></button> : <button className="btn btn-ghost px-2" disabled={!!download && !download.done} onClick={() => downloadFile(contentUrl(selected.id, 'download', next), entry.name)}><Download size={17}/></button>}</div> }) : <div className="p-12 text-center text-sm text-slate-400">此文件夹为空</div>}</section>}
   </> : <><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><div className="text-sm text-slate-400">共 {shown.length} 个分享项目</div><div className="relative w-full sm:w-64"><Search size={16} className="absolute left-3 top-3.5 text-slate-500"/><input className="input pl-9" placeholder="搜索分享项目" value={query} onChange={e => setQuery(e.target.value)}/></div></div><section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{shown.map(item => { const Icon = item.type === 'text' ? FileText : item.type === 'directory' ? Folder : File; return <button key={item.id} onClick={() => open(item)} className="glass group min-h-44 rounded-2xl p-5 text-left transition hover:-translate-y-1 hover:border-emerald-300/30"><div className={`mb-5 flex h-12 w-12 items-center justify-center rounded-xl ${item.type === 'directory' ? 'bg-amber-200/10 text-amber-200' : item.type === 'text' ? 'bg-violet-200/10 text-violet-200' : 'bg-sky-200/10 text-sky-200'}`}><Icon size={24}/></div><div className="truncate font-semibold group-hover:text-emerald-200">{item.name}</div><div className="mt-2 text-xs text-slate-400">{item.type === 'directory' ? '文件夹' : item.type === 'text' ? '文本' : '文件'} · {size(item.size)}</div>{item.status !== 'active' && <div className="mt-2 text-xs text-rose-300">源文件已失效</div>}</button> })}</section>{!shown.length && <div className="glass rounded-2xl px-6 py-16 text-center text-sm text-slate-400">{query ? '没有找到匹配的项目' : '暂时没有分享项目'}</div>}</>}
+
+  {download && <div className="glass mt-6 rounded-2xl p-5"><div className="mb-2 flex items-center justify-between gap-3 text-sm"><span className="truncate">{download.name}</span><span>{download.total ? `${size(download.loaded)} / ${size(download.total)}` : size(download.loaded)}</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-700"><div className="h-full rounded-full bg-emerald-200 transition-all" style={{ width: `${download.progress}%` }}/></div><div className="mt-2 text-xs text-slate-400">{download.done ? '下载完成' : download.total ? `${download.progress}% · 正在下载` : '正在下载'}</div></div>}
 
   {allowUpload && <section className="glass mt-10 rounded-2xl p-5"><div className="mb-1 flex items-center gap-2 font-semibold"><UploadCloud size={19} className="text-emerald-200"/> 上传到分享者设备</div><p className="mb-5 text-xs text-slate-400">文件会保存到分享者的 LocalDrop uploads 目录</p><div onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); uploadFiles(e.dataTransfer.files) }} className="rounded-xl border border-dashed border-slate-600 bg-slate-800/30 p-8 text-center"><UploadCloud size={30} className="mx-auto mb-3 text-emerald-200"/><p className="text-sm">拖拽文件到这里，或选择文件上传</p><input ref={inputRef} type="file" multiple className="mt-4 max-w-full text-xs file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-200 file:px-3 file:py-2 file:font-semibold file:text-slate-900" onChange={e => uploadFiles(e.target.files)}/></div>{upload && <div className="mt-4"><div className="mb-2 flex items-center justify-between gap-2 text-xs"><span className="truncate">{upload.done && <CheckCircle2 size={14} className="mr-1 inline text-emerald-200"/>}{upload.name}</span><span>{upload.progress}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-slate-700"><div className="h-full rounded-full bg-emerald-200 transition-all" style={{ width: `${upload.progress}%` }}/></div></div>}</section>}
   </main><footer className="border-t border-white/[.06] py-7 text-center text-xs text-slate-500">LocalDrop · 只在当前局域网中分享</footer></div>

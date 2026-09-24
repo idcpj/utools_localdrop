@@ -4,6 +4,7 @@ const path = require('node:path')
 const os = require('node:os')
 const http = require('node:http')
 const crypto = require('node:crypto')
+const { spawn } = require('node:child_process')
 const { pipeline } = require('node:stream/promises')
 
 const MAX_UPLOAD = 1024 * 1024 * 1024
@@ -99,6 +100,12 @@ class LocalDrop {
     this.server = null
     this.sessions = new Map()
     this.attempts = new Map()
+    this.tunnel = null
+    this.tunnelUrl = null
+    this.tunnelError = null
+    this.tunnelStarting = false
+    this.tunnelPromise = null
+    this.tunnelGeneration = 0
   }
 
   persist() {
@@ -120,7 +127,7 @@ class LocalDrop {
       return publicShare({ ...item, status, size }, true)
     }))
     const { passwordHash, ...settings } = this.state.settings
-    return { settings: { ...settings, hasPassword: !!passwordHash }, shares, running: !!this.server, addresses: addresses(), url: this.server ? `http://${settings.ip}:${settings.port}` : null }
+    return { settings: { ...settings, hasPassword: !!passwordHash }, shares, running: !!this.server, addresses: addresses(), url: this.server ? `http://${settings.ip}:${settings.port}` : null, tunnel: { running: !!this.tunnel, starting: this.tunnelStarting, url: this.tunnelUrl, error: this.tunnelError } }
   }
 
   async createText(name, text) {
@@ -164,6 +171,7 @@ class LocalDrop {
     if (patch.allowUpload !== undefined) this.state.settings.allowUpload = !!patch.allowUpload
     if (patch.password !== undefined) {
       if (patch.password && (patch.password.length < 6 || patch.password.length > 128)) throw new Error('密码长度需为 6–128 个字符')
+      if (!patch.password && this.tunnel) await this.stopTunnel()
       this.state.settings.passwordHash = patch.password ? hashPassword(patch.password) : null
       this.sessions.clear()
     }
@@ -194,12 +202,99 @@ class LocalDrop {
   }
 
   async stop() {
+    await this.stopTunnel()
     if (!this.server) return this.snapshot()
     const server = this.server
     this.server = null
     this.sessions.clear()
     server.closeAllConnections?.()
     await new Promise(resolve => server.close(resolve))
+    return this.snapshot()
+  }
+
+  async startTunnel() {
+    if (!this.state.settings.passwordHash) throw new Error('开启公网分享前请先设置站点密码')
+    if (this.tunnel) return this.snapshot()
+    if (this.tunnelPromise) return this.tunnelPromise
+    const generation = ++this.tunnelGeneration
+    this.tunnelStarting = true
+    this.tunnelError = null
+    this.tunnelPromise = (async () => {
+      if (!this.server) await this.start()
+      const cloudflared = require('cloudflared')
+      const binName = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared'
+      const executable = path.join(this.dataDir, 'bin', binName)
+      await fsp.mkdir(path.dirname(executable), { recursive: true })
+      if (!fs.existsSync(executable)) await cloudflared.install(executable)
+      if (generation !== this.tunnelGeneration || !this.server) throw new Error('公网隧道启动已取消')
+      if (process.platform !== 'win32') await fsp.chmod(executable, 0o755).catch(() => {})
+      const localUrl = `http://${this.state.settings.ip}:${this.state.settings.port}`
+      const child = spawn(executable, ['tunnel', '--url', localUrl], {
+        cwd: path.dirname(executable),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        windowsVerbatimArguments: false,
+      })
+      const tunnel = {
+        process: child,
+        stop: () => { if (!child.killed) child.kill('SIGINT') },
+      }
+      this.tunnel = tunnel
+      this.tunnelStarting = true
+      const connected = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('等待 Cloudflare 公网地址超时')), 60_000)
+        timeout.unref?.()
+        let output = ''
+        const onOutput = chunk => {
+          output += String(chunk)
+          const match = output.match(/https:\/\/([a-z0-9-]+)\.trycloudflare\.com/i)
+          if (match) {
+            clearTimeout(timeout)
+            this.tunnelUrl = match[0]
+            this.tunnelStarting = false
+            resolve(match[0])
+          }
+        }
+        child.stdout?.on('data', onOutput)
+        child.stderr?.on('data', onOutput)
+        child.once('error', error => { clearTimeout(timeout); reject(new Error(`cloudflared 启动失败：${error.code || error.message}${output ? ` · ${output.slice(-240)}` : ''}`)) })
+        child.once('exit', (code, signal) => {
+          clearTimeout(timeout)
+          if (this.tunnelStarting) reject(new Error(`cloudflared 启动失败（${code ?? signal ?? 'unknown'}）${output.slice(-240)}`))
+          if (this.tunnel === tunnel) {
+            this.tunnel = null
+            this.tunnelUrl = null
+            this.tunnelStarting = false
+            this.tunnelError = code || signal ? `公网隧道已退出（${code ?? signal}）` : '公网隧道已退出'
+          }
+        })
+      })
+      connected.catch(error => {
+        if (this.tunnel === tunnel) {
+          this.tunnel = null
+          this.tunnelStarting = false
+          this.tunnelError = error.message || '公网隧道启动失败'
+        }
+        tunnel.stop()
+      })
+      return connected
+    })()
+    try { await this.tunnelPromise; return this.snapshot() }
+    catch (error) { this.tunnelStarting = false; this.tunnel = null; this.tunnelUrl = null; this.tunnelError = error.message || '公网隧道启动失败'; throw new Error(this.tunnelError) }
+    finally { this.tunnelPromise = null }
+  }
+
+  async stopTunnel() {
+    this.tunnelGeneration++
+    const tunnel = this.tunnel
+    this.tunnel = null
+    this.tunnelUrl = null
+    this.tunnelStarting = false
+    this.tunnelError = null
+    if (tunnel) {
+      try { tunnel.stop() } catch {}
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
     return this.snapshot()
   }
 

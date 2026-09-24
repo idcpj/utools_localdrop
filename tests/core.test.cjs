@@ -53,3 +53,10 @@ test('file download token works without a session and is not exposed to visitors
   response = await fetch(`${base}/api/shares`)
   assert.equal(response.status, 401)
 }))
+
+test('public tunnel requires a site password', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'localdrop-tunnel-'))
+  const drop = new LocalDrop({ dataDir: path.join(root, 'data'), siteDir: path.resolve(__dirname, '../dist') })
+  await assert.rejects(() => drop.startTunnel(), /站点密码/)
+  await fs.rm(root, { recursive: true, force: true })
+})
