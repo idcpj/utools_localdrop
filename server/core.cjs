@@ -240,21 +240,45 @@ class LocalDrop {
         windowsVerbatimArguments: false,
         shell: false,
       }
-      let child = this.spawnImpl(executable, args, spawnOptions)
-      if (process.platform === 'win32') {
-        const firstChild = child
-        child = await new Promise((resolve, reject) => {
-          let settled = false
-          const retry = error => {
-            if (settled) return
-            if (error?.code !== 'UNKNOWN') { settled = true; reject(new Error(`cloudflared 启动失败：${error?.code || error?.message || 'unknown'}`)); return }
-            const fallback = this.spawnImpl(executable, args, { ...spawnOptions, shell: true })
-            fallback.once('spawn', () => { settled = true; resolve(fallback) })
-            fallback.once('error', fallbackError => { settled = true; reject(new Error(`cloudflared 启动失败：${fallbackError.code || fallbackError.message}`)) })
+      const spawnWindowsFallback = () => {
+        const comspec = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe'
+        const quote = value => `"${String(value).replace(/"/g, '""')}"`
+        const commandLine = `${quote(executable)} tunnel --url ${quote(localUrl)}`
+        return this.spawnImpl(comspec, ['/d', '/s', '/c', commandLine], spawnOptions)
+      }
+      const waitForSpawn = (child, allowUnknownFallback) => new Promise((resolve, reject) => {
+        let settled = false
+        const fail = error => {
+          if (settled) return
+          if (allowUnknownFallback && error?.code === 'UNKNOWN') {
+            settled = true
+            try { resolve({ fallback: true }) } catch (spawnError) { reject(spawnError) }
+            return
           }
-          firstChild.once('spawn', () => { settled = true; resolve(firstChild) })
-          firstChild.once('error', retry)
-        })
+          settled = true
+          reject(new Error(`cloudflared 启动失败：${error?.code || error?.message || 'unknown'}`))
+        }
+        child.once('spawn', () => { if (!settled) { settled = true; resolve({ child }) } })
+        child.once('error', fail)
+      })
+      let child
+      if (process.platform === 'win32') {
+        let firstChild
+        try { firstChild = this.spawnImpl(executable, args, spawnOptions) } catch (error) {
+          if (error?.code !== 'UNKNOWN') throw new Error(`cloudflared 启动失败：${error?.code || error?.message || 'unknown'}`)
+        }
+        if (firstChild) {
+          const firstResult = await waitForSpawn(firstChild, true)
+          child = firstResult.child
+        }
+        if (!child) {
+          let fallback
+          try { fallback = spawnWindowsFallback() } catch (error) { throw new Error(`cloudflared 启动失败：${error?.code || error?.message || 'unknown'}`) }
+          child = (await waitForSpawn(fallback, false)).child
+        }
+      } else {
+        try { child = this.spawnImpl(executable, args, spawnOptions) } catch (error) { throw new Error(`cloudflared 启动失败：${error?.code || error?.message || 'unknown'}`) }
+        await waitForSpawn(child, false)
       }
       const tunnel = {
         process: child,
