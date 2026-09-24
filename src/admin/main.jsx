@@ -39,7 +39,14 @@ function App() {
     catch (error) { setNotice(error.message || '操作失败') }
     finally { setBusy(false) }
   }
-  const copy = value => { api.copy(value); setNotice('已复制到剪贴板') }
+  const copy = async value => {
+    try {
+      await Promise.resolve(api.copy(value))
+      setNotice('链接已复制到剪贴板')
+      window.clearTimeout(copy.noticeTimer)
+      copy.noticeTimer = window.setTimeout(() => setNotice(''), 2200)
+    } catch (error) { setNotice(error.message || '复制失败') }
+  }
   const shareBaseUrl = data?.tunnel?.url || data?.url
   const itemUrl = item => item.type === 'file'
     ? `${shareBaseUrl}/api/shares/${encodeURIComponent(item.id)}/download?token=${encodeURIComponent(item.downloadToken)}`

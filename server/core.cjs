@@ -538,7 +538,18 @@ class LocalDrop {
     try {
       await pipeline(limit(req), fs.createWriteStream(target, { flags: 'wx', mode: 0o600 }))
     } catch (error) { await fsp.unlink(target).catch(() => {}); throw error }
-    return json(res, 201, { name: path.basename(target), size })
+    const item = {
+      id: crypto.randomUUID(),
+      type: 'file',
+      name: path.basename(target),
+      sourcePath: target,
+      size,
+      downloadToken: crypto.randomBytes(24).toString('hex'),
+      createdAt: new Date().toISOString(),
+    }
+    this.state.shares.unshift(item)
+    this.persist()
+    return json(res, 201, { ...publicShare(item, true) })
   }
 
   async staticFile(pathname, res, head) {

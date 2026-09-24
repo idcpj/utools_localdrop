@@ -54,7 +54,19 @@ test('upload saves into data uploads when enabled', async () => withDrop(async (
   const cookie = response.headers.get('set-cookie').split(';')[0]
   const upload = await fetch(`${base}/api/uploads?name=note.txt`, { method: 'POST', headers: { cookie }, body: 'uploaded' })
   assert.equal(upload.status, 201)
+  const uploaded = await upload.json()
   assert.equal((await fs.readFile(path.join(root, 'data', 'uploads', 'note.txt'))).toString(), 'uploaded')
+  assert.equal(uploaded.type, 'file')
+  assert.equal(uploaded.name, 'note.txt')
+  assert.ok(uploaded.downloadToken)
+  assert.equal(drop.state.shares[0].id, uploaded.id)
+  const restarted = new LocalDrop({ dataDir: path.join(root, 'data'), siteDir: path.resolve(__dirname, '../dist') })
+  const snapshot = await restarted.snapshot()
+  assert.equal(snapshot.shares[0].id, uploaded.id)
+  assert.equal(snapshot.shares[0].status, 'active')
+  const downloaded = await fetch(`${base}/api/shares/${uploaded.id}/download?token=${uploaded.downloadToken}`)
+  assert.equal(downloaded.status, 200)
+  assert.equal(await downloaded.text(), 'uploaded')
 }))
 
 test('file download token works without a session and is not exposed to visitors', async () => withDrop(async (drop, root, base) => {

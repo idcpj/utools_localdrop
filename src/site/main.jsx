@@ -86,7 +86,12 @@ function App() {
     if (!files?.length || !allowUpload) return
     const queue = Array.from(files)
     const run = index => {
-      if (index >= queue.length) { setUpload({ done: true, progress: 100, name: `${queue.length} 个文件上传完成` }); if (inputRef.current) inputRef.current.value = ''; return }
+      if (index >= queue.length) {
+        loadShares().catch(e => setError(e.message))
+        setUpload({ done: true, progress: 100, name: `${queue.length} 个文件上传完成` })
+        if (inputRef.current) inputRef.current.value = ''
+        return
+      }
       const file = queue[index]
       const xhr = new XMLHttpRequest()
       xhr.open('POST', `/api/uploads?name=${encodeURIComponent(file.name)}`)
