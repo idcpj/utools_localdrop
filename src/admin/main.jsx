@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QRCodeSVG } from 'qrcode.react'
 import { ArrowDownToLine, Copy, File, FileText, Folder, Globe2, HardDrive, KeyRound, Pause, Play, Plus, Power, QrCode, RefreshCw, Settings2, ShieldCheck, Trash2, Upload, Wifi, X } from 'lucide-react'
@@ -17,6 +17,8 @@ function App() {
   const [text, setText] = useState('')
   const [password, setPassword] = useState('')
   const [notice, setNotice] = useState('')
+  const [toast, setToast] = useState('')
+  const toastTimer = useRef(null)
   const [busy, setBusy] = useState(false)
   const [qr, setQr] = useState(null)
   const [config, setConfig] = useState(null)
@@ -42,10 +44,10 @@ function App() {
   const copy = async value => {
     try {
       await Promise.resolve(api.copy(value))
-      setNotice('链接已复制到剪贴板')
-      window.clearTimeout(copy.noticeTimer)
-      copy.noticeTimer = window.setTimeout(() => setNotice(''), 2200)
-    } catch (error) { setNotice(error.message || '复制失败') }
+      setToast('链接已复制到剪贴板')
+      window.clearTimeout(toastTimer.current)
+      toastTimer.current = window.setTimeout(() => setToast(''), 2200)
+    } catch (error) { setToast(error.message || '复制失败') }
   }
   const shareBaseUrl = data?.tunnel?.url || data?.url
   const itemUrl = item => item.type === 'file'
@@ -57,6 +59,7 @@ function App() {
   const toggleTunnel = () => action(() => data?.tunnel?.running ? api.stopTunnel() : api.startTunnel(), data?.tunnel?.running ? '公网隧道已关闭' : '公网隧道已启动')
 
   return <div className="min-h-screen bg-[#111525] text-slate-100">
+    {toast && <div role="status" aria-live="polite" className="pointer-events-none fixed right-5 top-5 z-50 rounded-xl border border-emerald-200/25 bg-[#202a3d]/95 px-4 py-3 text-sm font-semibold text-emerald-100 shadow-2xl shadow-black/30 backdrop-blur-sm">{toast}</div>}
     <div className="mx-auto max-w-6xl px-5 pb-12 pt-7 md:px-8">
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-200 text-slate-900"><ArrowDownToLine size={25}/></div><div><h1 className="text-xl font-bold tracking-tight">LocalDrop</h1><p className="text-xs text-slate-400">让文件在局域网里自由流动</p></div></div>
