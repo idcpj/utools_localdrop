@@ -7,6 +7,7 @@ const dataRoot = utoolsApi?.getPath?.('userData') || path.join(os.homedir(), '.l
 const drop = new LocalDrop({ dataDir: path.join(dataRoot, 'localdrop'), siteDir: path.join(__dirname, 'dist') })
 let pending = null
 const listeners = new Set()
+let fileShareQueue = Promise.resolve()
 
 function notify() { for (const listener of listeners) listener(pending) }
 function filePaths(payload) {
@@ -15,10 +16,27 @@ function filePaths(payload) {
 }
 
 utoolsApi?.onPluginEnter?.(({ code, type, payload }) => {
-  if (code === 'share-files' || type === 'files') pending = { type: 'files', paths: filePaths(payload) }
-  else if (code === 'share-text' || type === 'over') pending = { type: 'text', text: typeof payload === 'string' ? payload : payload?.text || '' }
-  else pending = null
-  notify()
+  if (code === 'share-files' || type === 'files') {
+    const paths = filePaths(payload)
+    pending = { type: 'files', paths, status: 'processing' }
+    notify()
+    fileShareQueue = fileShareQueue.catch(() => {}).then(async () => {
+      if (!paths.length) throw new Error('没有收到可分享的文件路径')
+      const autoStarted = !drop.server
+      if (autoStarted) await drop.start()
+      const added = await drop.addPaths(paths)
+      pending = { type: 'files', paths, added, autoStarted, status: 'done' }
+      notify()
+    }).catch(error => {
+      pending = { type: 'files', paths, status: 'error', error: error.message || '自动分享失败' }
+      notify()
+    })
+  }
+  else {
+    if (code === 'share-text' || type === 'over') pending = { type: 'text', text: typeof payload === 'string' ? payload : payload?.text || '' }
+    else pending = null
+    notify()
+  }
 })
 
 window.localdrop = {
