@@ -242,9 +242,10 @@ class LocalDrop {
       }
       const spawnWindowsFallback = () => {
         const comspec = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe'
+        const script = path.join(path.dirname(executable), 'start-tunnel.cmd')
         const quote = value => `"${String(value).replace(/"/g, '""')}"`
-        const commandLine = `${quote(executable)} tunnel --url ${quote(localUrl)}`
-        return this.spawnImpl(comspec, ['/d', '/s', '/c', commandLine], spawnOptions)
+        fs.writeFileSync(script, `@echo off\r\n${quote(executable)} tunnel --url ${quote(localUrl)}\r\n`, { encoding: 'ascii', mode: 0o600 })
+        return this.spawnImpl(comspec, ['/d', '/c', 'call', script], spawnOptions)
       }
       const waitForSpawn = (child, allowUnknownFallback) => new Promise((resolve, reject) => {
         let settled = false

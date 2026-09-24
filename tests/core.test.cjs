@@ -94,9 +94,11 @@ test('public tunnel retries Windows spawn UNKNOWN with shell fallback', async ()
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'localdrop-spawn-fallback-'))
   const fakeCloudflared = { install: async executable => { await fs.writeFile(executable, Buffer.alloc(2048)) } }
   let calls = 0
+  let fallbackArgs
   const { EventEmitter } = require('node:events')
   const spawnImpl = (executable, args, options) => {
     calls++
+    if (calls === 2) fallbackArgs = { executable, args, options }
     const child = new EventEmitter()
     child.killed = false
     child.stdout = new EventEmitter()
@@ -112,6 +114,10 @@ test('public tunnel retries Windows spawn UNKNOWN with shell fallback', async ()
   const snapshot = await drop.startTunnel()
   assert.equal(calls, 2)
   assert.equal(snapshot.tunnel.url, 'https://fallback.trycloudflare.com')
+  if (fallbackArgs) {
+    assert.equal(fallbackArgs.args[2], 'call')
+    assert.match(await fs.readFile(fallbackArgs.args[3], 'ascii'), /cloudflared\.exe.*tunnel --url/)
+  }
   await drop.stop()
   await fs.rm(root, { recursive: true, force: true })
 })
