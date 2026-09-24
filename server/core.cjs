@@ -84,9 +84,11 @@ async function resolveShared(item, parts) {
 }
 
 class LocalDrop {
-  constructor({ dataDir, siteDir }) {
+  constructor({ dataDir, siteDir, spawnImpl = spawn, cloudflaredModule = null }) {
     this.dataDir = dataDir
     this.siteDir = siteDir
+    this.spawnImpl = spawnImpl
+    this.cloudflaredModule = cloudflaredModule
     fs.mkdirSync(dataDir, { recursive: true })
     this.file = path.join(dataDir, 'state.json')
     let saved = {}
@@ -221,20 +223,39 @@ class LocalDrop {
     this.tunnelError = null
     this.tunnelPromise = (async () => {
       if (!this.server) await this.start()
-      const cloudflared = require('cloudflared')
+      const cloudflared = this.cloudflaredModule || require('cloudflared')
       const binName = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared'
       const executable = path.join(this.dataDir, 'bin', binName)
       await fsp.mkdir(path.dirname(executable), { recursive: true })
       if (!fs.existsSync(executable)) await cloudflared.install(executable)
       if (generation !== this.tunnelGeneration || !this.server) throw new Error('公网隧道启动已取消')
+      const executableStat = await fsp.stat(executable).catch(() => null)
+      if (!executableStat?.isFile() || executableStat.size < 1024) throw new Error(`cloudflared 二进制不存在或损坏：${executable}`)
       if (process.platform !== 'win32') await fsp.chmod(executable, 0o755).catch(() => {})
       const localUrl = `http://${this.state.settings.ip}:${this.state.settings.port}`
-      const child = spawn(executable, ['tunnel', '--url', localUrl], {
-        cwd: path.dirname(executable),
+      const args = ['tunnel', '--url', localUrl]
+      const spawnOptions = {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         windowsVerbatimArguments: false,
-      })
+        shell: false,
+      }
+      let child = this.spawnImpl(executable, args, spawnOptions)
+      if (process.platform === 'win32') {
+        const firstChild = child
+        child = await new Promise((resolve, reject) => {
+          let settled = false
+          const retry = error => {
+            if (settled) return
+            if (error?.code !== 'UNKNOWN') { settled = true; reject(new Error(`cloudflared 启动失败：${error?.code || error?.message || 'unknown'}`)); return }
+            const fallback = this.spawnImpl(executable, args, { ...spawnOptions, shell: true })
+            fallback.once('spawn', () => { settled = true; resolve(fallback) })
+            fallback.once('error', fallbackError => { settled = true; reject(new Error(`cloudflared 启动失败：${fallbackError.code || fallbackError.message}`)) })
+          }
+          firstChild.once('spawn', () => { settled = true; resolve(firstChild) })
+          firstChild.once('error', retry)
+        })
+      }
       const tunnel = {
         process: child,
         stop: () => { if (!child.killed) child.kill('SIGINT') },

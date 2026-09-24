@@ -60,3 +60,58 @@ test('public tunnel requires a site password', async () => {
   await assert.rejects(() => drop.startTunnel(), /站点密码/)
   await fs.rm(root, { recursive: true, force: true })
 })
+
+test('public tunnel reports spawn errors instead of UNKNOWN', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'localdrop-spawn-'))
+  const fakeCloudflared = {
+    install: async executable => { await fs.writeFile(executable, Buffer.alloc(2048)) },
+  }
+  const drop = new LocalDrop({
+    dataDir: path.join(root, 'data'),
+    siteDir: path.resolve(__dirname, '../dist'),
+    cloudflaredModule: fakeCloudflared,
+    spawnImpl: () => {
+      const { EventEmitter } = require('node:events')
+      const child = new EventEmitter()
+      child.killed = false
+      child.stdout = new EventEmitter()
+      child.stderr = new EventEmitter()
+      child.kill = () => { child.killed = true }
+      queueMicrotask(() => child.emit('error', Object.assign(new Error('权限不足'), { code: 'EACCES' })))
+      return child
+    },
+  })
+  await drop.updateSettings({ ip: '127.0.0.1', port: 47891, password: 'secret123' })
+  drop.server = { closeAllConnections() {}, close(callback) { callback() } }
+  await assert.rejects(() => drop.startTunnel(), /cloudflared 启动失败：EACCES/)
+  assert.match(drop.tunnelError, /EACCES/)
+  await drop.stop()
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('public tunnel retries Windows spawn UNKNOWN with shell fallback', async () => {
+  if (process.platform !== 'win32') return
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'localdrop-spawn-fallback-'))
+  const fakeCloudflared = { install: async executable => { await fs.writeFile(executable, Buffer.alloc(2048)) } }
+  let calls = 0
+  const { EventEmitter } = require('node:events')
+  const spawnImpl = (executable, args, options) => {
+    calls++
+    const child = new EventEmitter()
+    child.killed = false
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = () => { child.killed = true; child.emit('exit', 0, 'SIGINT') }
+    if (calls === 1) queueMicrotask(() => child.emit('error', Object.assign(new Error('unknown'), { code: 'UNKNOWN' })))
+    else queueMicrotask(() => { child.emit('spawn'); setTimeout(() => child.stderr.emit('data', 'https://fallback.trycloudflare.com\n'), 5) })
+    return child
+  }
+  const drop = new LocalDrop({ dataDir: path.join(root, 'data'), siteDir: path.resolve(__dirname, '../dist'), cloudflaredModule: fakeCloudflared, spawnImpl })
+  await drop.updateSettings({ ip: '127.0.0.1', port: 47892, password: 'secret123' })
+  drop.server = { closeAllConnections() {}, close(callback) { callback() } }
+  const snapshot = await drop.startTunnel()
+  assert.equal(calls, 2)
+  assert.equal(snapshot.tunnel.url, 'https://fallback.trycloudflare.com')
+  await drop.stop()
+  await fs.rm(root, { recursive: true, force: true })
+})
