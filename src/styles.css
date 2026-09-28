@@ -2,23 +2,342 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #e8ecf4; background: #111525; }
-* { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; }
-button, input, textarea, select { font: inherit; }
-button { cursor: pointer; }
-button:disabled { cursor: not-allowed; opacity: .5; }
-::selection { background: #8af0bb; color: #172135; }
-.glass { background: rgba(29, 34, 52, .88); border: 1px solid rgba(255,255,255,.08); box-shadow: 0 14px 44px rgba(0,0,0,.14); }
-.input { width: 100%; background: #141a2b; border: 1px solid #343b53; border-radius: 12px; color: #f2f5fb; padding: 11px 13px; outline: none; transition: border-color .2s, box-shadow .2s; }
-.input:focus { border-color: #91eebe; box-shadow: 0 0 0 3px rgba(145,238,190,.12); }
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 12px; padding: 10px 14px; font-weight: 650; transition: transform .15s, background .15s; }
-.btn:active { transform: scale(.97); }
-.btn-primary { background: #a2efc5; color: #132332; }
-.btn-primary:hover { background: #bcf7d7; }
-.btn-secondary { background: #30384d; color: #ecf0f8; }
-.btn-secondary:hover { background: #3c465e; }
-.btn-ghost { color: #abb4ca; }
-.btn-ghost:hover { background: #293149; color: white; }
-.label { color: #aeb7cc; font-size: 12px; font-weight: 650; letter-spacing: .04em; }
-.muted { color: #9aa5bd; }
+:root {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-feature-settings: "calt" 1, "kern" 1, "liga" 1, "ss03" 1;
+  color: #cdcdcd;
+  background-color: #07080a;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background-color: #07080a;
+  color: #cdcdcd;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button, input, textarea, select {
+  font-family: inherit;
+  font-feature-settings: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+::selection {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+/* Custom Sleek Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #242728;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3d40;
+}
+
+/* Raycast Component Primitives */
+.raycast-card {
+  background-color: #0d0d0d;
+  border: 1px solid #242728;
+  border-radius: 10px;
+  transition: border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.raycast-card-elevated {
+  background-color: #101111;
+  border: 1px solid #242728;
+  border-radius: 10px;
+}
+
+.raycast-card-subtle {
+  background-color: #0d0d0d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.raycast-input {
+  width: 100%;
+  background-color: #101111;
+  border: 1px solid #242728;
+  border-radius: 8px;
+  color: #f4f4f6;
+  padding: 8px 12px;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.5;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.raycast-input:focus {
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+  background-color: #141517;
+}
+
+.raycast-input::placeholder {
+  color: #6a6b6c;
+}
+
+/* Raycast Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0.15px;
+  border: 1px solid transparent;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* Primary CTA: Crisp White Pill / Rounded with Pure Black Text */
+.btn-primary {
+  background-color: #ffffff;
+  color: #000000;
+  font-weight: 550;
+  border-color: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #e8e8e8;
+  border-color: #e8e8e8;
+}
+
+/* Secondary Button: Elevated Dark with Hairline Border */
+.btn-secondary {
+  background-color: #101111;
+  color: #f4f4f6;
+  border-color: #242728;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: #18191b;
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+/* Tertiary / Card-Button */
+.btn-tertiary {
+  background-color: #121212;
+  color: #cdcdcd;
+  border-color: #242728;
+}
+
+.btn-tertiary:hover:not(:disabled) {
+  background-color: #1c1d20;
+  color: #ffffff;
+}
+
+/* Ghost Button: Inky transparent with subtle highlight */
+.btn-ghost {
+  background-color: transparent;
+  color: #9c9c9d;
+  border-color: transparent;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #f4f4f6;
+}
+
+/* Destructive Button */
+.btn-danger-ghost {
+  background-color: transparent;
+  color: #9c9c9d;
+  border-color: transparent;
+}
+
+.btn-danger-ghost:hover:not(:disabled) {
+  background-color: rgba(255, 97, 97, 0.12);
+  color: #ff6161;
+}
+
+/* Raycast Keycap */
+.keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #18191c 0%, #0d0d0f 100%);
+  border: 1px solid #2b2e30;
+  box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.6), inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+  color: #9c9c9d;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 4px;
+  padding: 2px 5px;
+  min-width: 18px;
+  height: 19px;
+  user-select: none;
+}
+
+/* Raycast Pill Tabs */
+.pill-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #9c9c9d;
+  background-color: transparent;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.pill-tab:hover {
+  color: #f4f4f6;
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.pill-tab-active {
+  color: #ffffff;
+  background-color: #141517;
+  border-color: #242728;
+}
+
+/* Raycast Badges */
+.badge-info-soft {
+  background-color: rgba(87, 193, 255, 0.12);
+  color: #57c1ff;
+  border: 1px solid rgba(87, 193, 255, 0.25);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  padding: 1.5px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-green-soft {
+  background-color: rgba(89, 212, 153, 0.12);
+  color: #59d499;
+  border: 1px solid rgba(89, 212, 153, 0.25);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  padding: 1.5px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-yellow-soft {
+  background-color: rgba(255, 197, 51, 0.12);
+  color: #ffc533;
+  border: 1px solid rgba(255, 197, 51, 0.25);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  padding: 1.5px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-red-soft {
+  background-color: rgba(255, 97, 97, 0.12);
+  color: #ff6161;
+  border: 1px solid rgba(255, 97, 97, 0.25);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  padding: 1.5px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-neutral {
+  background-color: #121212;
+  color: #9c9c9d;
+  border: 1px solid #242728;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  padding: 1.5px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Raycast Hero Stripe Decorative Effect */
+.raycast-hero-stripe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, #ff5757 30%, #ff7357 50%, #a1131a 80%, transparent 100%);
+  opacity: 0.85;
+}
+
+/* Command Palette Row */
+.command-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background-color: transparent;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.command-row:hover {
+  background-color: #121212;
+  border-color: #242728;
+}
+
+.command-row-active {
+  background-color: #161719;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* App Icon Tile */
+.app-icon-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background-color: #121212;
+  border: 1px solid #242728;
+  flex-shrink: 0;
+}
