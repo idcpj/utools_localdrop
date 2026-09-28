@@ -36,3 +36,13 @@ pnpm test
 - 根目录密码是全站统一密码，密码以哈希形式保存。
 - 公网临时分享使用 Cloudflare Quick Tunnel，必须先设置站点密码并手动开启；公网文件下载直链使用独立令牌。停止本地服务、清除站点密码或退出 uTools 时，隧道会关闭。
 - 首次启动公网隧道需要联网下载平台对应的 cloudflared 二进制到插件数据目录 `localdrop/bin/`。
+
+## 插件市场发布与管理
+
+发布 uTools 插件市场所需的版本说明、应用介绍、8 张宣传截图规划与自检清单，请参阅 [docs/ 目录说明](./docs/README.md)：
+
+- [版本更新说明 (Release Notes)](./docs/release-notes.md)
+- [插件应用介绍文案 (App Description)](./docs/app-description.md)
+- [8 张应用截图规划与规范 (Screenshots Guide)](./docs/screenshots-guide.md)
+- [发布与审核自检清单 (Publish Checklist)](./docs/publish-checklist.md)
+
