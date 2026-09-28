@@ -205,3 +205,45 @@ test('public tunnel handles synchronous Windows spawn UNKNOWN', async () => {
   await drop.stop()
   await fs.rm(root, { recursive: true, force: true })
 })
+
+test('origin verification handles public https tunnel and blocks untrusted cross-origin requests', async () => withDrop(async (drop, root, base) => {
+  // 设置模拟的公网隧道地址
+  drop.tunnelUrl = 'https://demo-tunnel.trycloudflare.com'
+
+  // 1. 本地合法 Origin 应该通过
+  const localRes = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'origin': base,
+    },
+    body: JSON.stringify({ password: 'secret123' }),
+  })
+  assert.equal(localRes.status, 200)
+
+  // 2. 公网 HTTPS 隧道 Origin 应该通过
+  const tunnelRes = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'origin': 'https://demo-tunnel.trycloudflare.com',
+      'host': 'demo-tunnel.trycloudflare.com',
+    },
+    body: JSON.stringify({ password: 'secret123' }),
+  })
+  assert.equal(tunnelRes.status, 200)
+
+  // 3. 恶意第三方的跨站 Origin 应该被拒绝并返回 403 请求来源无效
+  const evilRes = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'origin': 'https://malicious-attacker.com',
+    },
+    body: JSON.stringify({ password: 'secret123' }),
+  })
+  assert.equal(evilRes.status, 403)
+  const evilJson = await evilRes.json()
+  assert.equal(evilJson.error, '请求来源无效')
+}))
+

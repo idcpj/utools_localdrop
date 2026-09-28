@@ -420,8 +420,30 @@ class LocalDrop {
     const url = new URL(req.url, 'http://localdrop.invalid')
     const pathname = url.pathname
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method) && req.headers.origin) {
-      const expected = `http://${req.headers.host}`
-      if (req.headers.origin !== expected) return json(res, 403, { error: '请求来源无效' })
+      let valid = false
+      try {
+        const originUrl = new URL(req.headers.origin)
+        const originHost = originUrl.host.toLowerCase()
+        const reqHost = req.headers.host ? req.headers.host.toLowerCase() : ''
+        const fwdHost = req.headers['x-forwarded-host'] ? String(req.headers['x-forwarded-host']).split(',')[0].trim().toLowerCase() : ''
+        const tunnelHost = this.tunnelUrl ? new URL(this.tunnelUrl).host.toLowerCase() : ''
+        const localHosts = [
+          `${this.state.settings.ip}:${this.state.settings.port}`.toLowerCase(),
+          `127.0.0.1:${this.state.settings.port}`.toLowerCase(),
+          `localhost:${this.state.settings.port}`.toLowerCase(),
+        ]
+        if (originUrl.protocol === 'http:' || originUrl.protocol === 'https:') {
+          if (
+            (reqHost && originHost === reqHost) ||
+            (fwdHost && originHost === fwdHost) ||
+            (tunnelHost && originHost === tunnelHost) ||
+            localHosts.includes(originHost)
+          ) {
+            valid = true
+          }
+        }
+      } catch {}
+      if (!valid) return json(res, 403, { error: '请求来源无效' })
     }
     if (pathname === '/api/health') return json(res, 200, { ok: true, passwordRequired: !!this.state.settings.passwordHash })
     if (pathname === '/api/auth/status') return json(res, 200, { authenticated: this.authorized(req), passwordRequired: !!this.state.settings.passwordHash })
