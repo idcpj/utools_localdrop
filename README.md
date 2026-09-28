@@ -5,14 +5,14 @@
 ## 开发
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 ## 构建
 
 ```bash
-npm run build
+pnpm build
 ```
 
 构建完成后，`dist/` 是完整的可安装 uTools 插件目录，直接在 uTools 开发者工具中选择该目录即可安装。目录内包含 `plugin.json`、`index.html`、`site.html`、`logo.png`、`plugin.js`、`preload.js`、`package.json`、`server/` 和构建后的静态资源。
@@ -20,7 +20,7 @@ npm run build
 ## 验证
 
 ```bash
-npm test
+pnpm test
 ```
 
 测试覆盖站点密码、分享列表、文件夹浏览、文件下载和上传保存。

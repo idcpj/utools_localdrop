@@ -58,14 +58,21 @@ async function main() {
   manifest.logo = 'logo.png'
   manifest.preload = 'plugin.js'
   await fsp.writeFile(path.join(dist, 'plugin.json'), `${JSON.stringify(manifest, null, 2)}\n`)
-  await copy(path.join(root, 'logo.svg'), path.join(dist, 'logo.svg'))
-  await fsp.writeFile(path.join(dist, 'logo.png'), logoPng())
+  if (fs.existsSync(path.join(root, 'logo.png'))) {
+    await copy(path.join(root, 'logo.png'), path.join(dist, 'logo.png'))
+  } else {
+    await fsp.writeFile(path.join(dist, 'logo.png'), logoPng())
+  }
+  if (fs.existsSync(path.join(root, 'logo.svg'))) {
+    await copy(path.join(root, 'logo.svg'), path.join(dist, 'logo.svg'))
+  }
   await fsp.cp(path.join(root, 'server'), path.join(dist, 'server'), { recursive: true, force: true })
-  const cloudflaredDir = path.join(root, 'node_modules', 'cloudflared')
+  const cloudflaredPkg = require.resolve('cloudflared/package.json', { paths: [root] })
+  const cloudflaredDir = path.dirname(cloudflaredPkg)
   const packagedCloudflared = path.join(dist, 'node_modules', 'cloudflared')
   await fsp.mkdir(packagedCloudflared, { recursive: true })
-  await copy(path.join(cloudflaredDir, 'package.json'), path.join(packagedCloudflared, 'package.json'))
-  await fsp.cp(path.join(cloudflaredDir, 'lib'), path.join(packagedCloudflared, 'lib'), { recursive: true, force: true })
+  await copy(cloudflaredPkg, path.join(packagedCloudflared, 'package.json'))
+  await fsp.cp(path.join(cloudflaredDir, 'lib'), path.join(packagedCloudflared, 'lib'), { recursive: true, force: true, dereference: true })
 
   // uTools loads the preload entry from the plugin package root. Keep both names
   // because older local plugin templates use preload.js while this project uses plugin.js.
