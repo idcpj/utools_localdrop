@@ -46,7 +46,7 @@ const mockApi = {
       { id: '2', name: 'UI_Icons_Export', type: 'directory', size: 48600000, createdAt: Date.now() - 10800000, status: 'active' },
       { id: '3', name: 'Production_Env_Config', type: 'text', size: 840, createdAt: Date.now() - 86400000, status: 'active' },
     ],
-    tunnel: { running: false, starting: false, url: '', error: null },
+    tunnel: { running: false, starting: false, url: '', error: null, statusText: null, progress: 0 },
   }),
   pending: () => null,
   onPending: () => () => {},
@@ -104,6 +104,13 @@ function App() {
       clearInterval(timer)
     }
   }, [])
+
+  useEffect(() => {
+    if (data?.tunnel?.starting) {
+      const timer = setInterval(() => refresh().catch(() => {}), 800)
+      return () => clearInterval(timer)
+    }
+  }, [data?.tunnel?.starting])
 
   useEffect(() => {
     if (data && !config) setConfig({ ip: data.settings.ip, port: data.settings.port })
@@ -235,7 +242,9 @@ function App() {
             {isTunnelStarting && (
               <span className="badge-yellow-soft animate-pulse">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#ffc533]" />
-                隧道连接中
+                {data?.tunnel?.progress > 0 && data?.tunnel?.progress < 100
+                  ? `下载组件 ${data.tunnel.progress}%`
+                  : '隧道连接中'}
               </span>
             )}
 
@@ -358,7 +367,7 @@ function App() {
               <div className="flex items-center justify-between gap-3 rounded-lg border border-[#242728] bg-[#101111] p-3 md:p-3.5">
                 <div className="min-w-0 flex-1">
                   <div className="font-mono text-sm md:text-base font-medium text-[#f4f4f6] truncate select-all">
-                    {isTunnelActive ? data.tunnel.url : isTunnelStarting ? '正在分配临时公网域名…' : data?.url || '服务未启动'}
+                    {isTunnelActive ? data.tunnel.url : isTunnelStarting ? (data?.tunnel?.statusText || '正在分配临时公网域名…') : data?.url || '服务未启动'}
                   </div>
                 </div>
 
@@ -390,12 +399,23 @@ function App() {
                 </div>
               </div>
 
+              {isTunnelStarting && typeof data?.tunnel?.progress === 'number' && data.tunnel.progress > 0 && data.tunnel.progress < 100 && (
+                <div className="w-full bg-[#181a1b] h-1.5 rounded-full overflow-hidden my-0.5">
+                  <div
+                    className="bg-[#57c1ff] h-full transition-all duration-300 ease-out rounded-full"
+                    style={{ width: `${data.tunnel.progress}%` }}
+                  />
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center justify-between text-xs text-[#9c9c9d] px-1">
                 <span>
                   {isTunnelActive
                     ? '公网临时分享已激活，任何互联网设备均可访问'
                     : isTunnelStarting
-                    ? 'Cloudflare 正在握手，通常需要 2-5 秒…'
+                    ? (data?.tunnel?.statusText?.includes('下载')
+                        ? '首次开启需下载核心组件（约 50MB），已启用国内高速镜像加速…'
+                        : 'Cloudflare 正在握手分配域名，通常需要 2-5 秒…')
                     : '同一 Wi-Fi 或热点下的手机、平板、电脑均可直接打开'}
                 </span>
 
@@ -806,7 +826,9 @@ function App() {
                       onClick={toggleTunnel}
                     >
                       {data.tunnel?.starting ? (
-                        '连接中…'
+                        data.tunnel?.progress > 0 && data.tunnel?.progress < 100
+                          ? `下载中 ${data.tunnel.progress}%`
+                          : '连接中…'
                       ) : data.tunnel?.running ? (
                         '关闭公网'
                       ) : (
@@ -814,6 +836,25 @@ function App() {
                       )}
                     </button>
                   </div>
+
+                  {data.tunnel?.starting && (
+                    <div className="mt-2.5 rounded border border-[#242728] bg-[#07080a] p-2.5">
+                      <div className="flex items-center justify-between text-xs text-[#57c1ff]">
+                        <span>{data.tunnel.statusText || '正在分配临时公网域名…'}</span>
+                        {data.tunnel.progress > 0 && data.tunnel.progress < 100 && (
+                          <span className="font-mono">{data.tunnel.progress}%</span>
+                        )}
+                      </div>
+                      {data.tunnel.progress > 0 && data.tunnel.progress < 100 && (
+                        <div className="w-full bg-[#181a1b] h-1.5 rounded-full overflow-hidden mt-2">
+                          <div
+                            className="bg-[#57c1ff] h-full transition-all duration-300 ease-out rounded-full"
+                            style={{ width: `${data.tunnel.progress}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {!data.settings.hasPassword && (
                     <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-[#ffc533]">
@@ -840,7 +881,12 @@ function App() {
                   )}
 
                   {data.tunnel?.error && (
-                    <div className="mt-2.5 text-[11px] text-[#ff6161]">{data.tunnel.error}</div>
+                    <div className="mt-2.5 text-[11px] text-[#ff6161] space-y-1">
+                      <div>{data.tunnel.error}</div>
+                      <div className="text-[10px] text-[#9c9c9d]">
+                        提示：若网络环境受限无法在线下载，可在插件数据目录 bin 文件夹中手动放置可执行文件。
+                      </div>
+                    </div>
                   )}
                 </div>
               </section>

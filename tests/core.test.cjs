@@ -247,3 +247,23 @@ test('origin verification handles public https tunnel and blocks untrusted cross
   assert.equal(evilJson.error, '请求来源无效')
 }))
 
+test('snapshot returns tunnel statusText and progress fields correctly', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'localdrop-tunnel-fields-'))
+  const fakeCloudflared = { install: async executable => { await fs.writeFile(executable, fakeWindowsExecutable()) } }
+  const drop = new LocalDrop({ dataDir: path.join(root, 'data'), siteDir: path.resolve(__dirname, '../dist'), cloudflaredModule: fakeCloudflared })
+  const initial = await drop.snapshot()
+  assert.equal(initial.tunnel.statusText, null)
+  assert.equal(initial.tunnel.progress, 0)
+  drop.tunnelStarting = true
+  drop.tunnelStatusText = '正在下载公网组件 (45%)…'
+  drop.tunnelProgress = 45
+  const inProgress = await drop.snapshot()
+  assert.equal(inProgress.tunnel.statusText, '正在下载公网组件 (45%)…')
+  assert.equal(inProgress.tunnel.progress, 45)
+  await drop.stopTunnel()
+  const stopped = await drop.snapshot()
+  assert.equal(stopped.tunnel.statusText, null)
+  assert.equal(stopped.tunnel.progress, 0)
+  await fs.rm(root, { recursive: true, force: true })
+})
+

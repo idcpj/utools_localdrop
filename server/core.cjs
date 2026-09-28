@@ -3,8 +3,9 @@ const fsp = require('node:fs/promises')
 const path = require('node:path')
 const os = require('node:os')
 const http = require('node:http')
+const https = require('node:https')
 const crypto = require('node:crypto')
-const { spawn } = require('node:child_process')
+const { spawn, execSync } = require('node:child_process')
 const { pipeline } = require('node:stream/promises')
 
 const MAX_UPLOAD = 1024 * 1024 * 1024
@@ -120,6 +121,163 @@ function validPeBuffer(buffer, fileSize) {
   return true
 }
 
+const GITHUB_DOWNLOAD_BASE = 'https://github.com/cloudflare/cloudflared/releases/latest/download/'
+const MIRROR_PREFIXES = [
+  'https://ghfast.top/',
+  'https://ghproxy.net/',
+  '' // 官方 GitHub 源直连兜底
+]
+
+function getCloudflaredFileName() {
+  const platform = process.platform
+  const arch = process.arch
+  if (platform === 'win32') {
+    return arch === 'ia32' ? 'cloudflared-windows-386.exe' : 'cloudflared-windows-amd64.exe'
+  }
+  if (platform === 'darwin') {
+    return arch === 'arm64' ? 'cloudflared-darwin-arm64.tgz' : 'cloudflared-darwin-amd64.tgz'
+  }
+  if (platform === 'linux') {
+    const map = { arm64: 'cloudflared-linux-arm64', arm: 'cloudflared-linux-arm', x64: 'cloudflared-linux-amd64', ia32: 'cloudflared-linux-386' }
+    return map[arch] || 'cloudflared-linux-amd64'
+  }
+  throw new Error(`不支持的系统平台: ${platform}`)
+}
+
+function fetchWithRedirect(initialUrl, maxRedirects = 5, timeoutMs = 25000) {
+  return new Promise((resolve, reject) => {
+    const doRequest = (currentUrl, redirectsLeft) => {
+      let parsed
+      try { parsed = new URL(currentUrl) } catch (err) { return reject(err) }
+      const client = parsed.protocol === 'http:' ? http : https
+      const req = client.get(currentUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': '*/*'
+        }
+      }, res => {
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+          res.resume()
+          if (redirectsLeft <= 0) return reject(new Error('重定向次数过多'))
+          const nextUrl = new URL(res.headers.location, currentUrl).toString()
+          return doRequest(nextUrl, redirectsLeft - 1)
+        }
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          res.resume()
+          return reject(new Error(`HTTP 响应码异常：${res.statusCode}`))
+        }
+        resolve(res)
+      })
+      req.on('error', reject)
+      req.setTimeout(timeoutMs, () => {
+        req.destroy(new Error(`连接超时（${timeoutMs}ms）`))
+      })
+    }
+    doRequest(initialUrl, maxRedirects)
+  })
+}
+
+async function downloadFileWithProgress(url, tempFile, onProgress) {
+  const res = await fetchWithRedirect(url)
+  const total = parseInt(res.headers['content-length'], 10) || 0
+  let received = 0
+  const out = fs.createWriteStream(tempFile)
+
+  await new Promise((resolve, reject) => {
+    let timer = null
+    const resetTimer = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        res.destroy(new Error('下载传输停滞超时'))
+      }, 30000)
+    }
+    resetTimer()
+
+    res.on('data', chunk => {
+      received += chunk.length
+      resetTimer()
+      if (total > 0 && onProgress) {
+        const percent = Math.min(99, Math.floor((received / total) * 100))
+        onProgress(percent, received, total)
+      }
+    })
+    res.pipe(out)
+    out.on('finish', () => {
+      clearTimeout(timer)
+      out.close(resolve)
+    })
+    const fail = err => {
+      clearTimeout(timer)
+      out.close(() => { fsp.rm(tempFile, { force: true }).catch(() => {}) })
+      reject(err)
+    }
+    res.on('error', fail)
+    out.on('error', fail)
+  })
+}
+
+async function downloadCloudflaredWithMirrors(executable, { onStatus, onProgress } = {}) {
+  const fileName = getCloudflaredFileName()
+  const dir = path.dirname(executable)
+  await fsp.mkdir(dir, { recursive: true })
+  let downloaded = false
+  let lastError = null
+  const tempFile = `${executable}.${Date.now()}.tmp`
+
+  for (let index = 0; index < MIRROR_PREFIXES.length; index++) {
+    const prefix = MIRROR_PREFIXES[index]
+    const downloadUrl = `${prefix}${GITHUB_DOWNLOAD_BASE}${fileName}`
+    const sourceLabel = prefix ? `国内镜像源 #${index + 1}` : 'GitHub 官方源'
+    try {
+      if (onStatus) onStatus(`正在通过 ${sourceLabel} 下载公网组件 (约50MB)…`)
+      if (onProgress) onProgress(0, 0, 0)
+      await downloadFileWithProgress(downloadUrl, tempFile, onProgress)
+
+      if (process.platform === 'darwin') {
+        execSync(`tar -xzf "${path.basename(tempFile)}"`, { cwd: dir })
+        await fsp.rm(tempFile, { force: true }).catch(() => {})
+        const extracted = path.join(dir, 'cloudflared')
+        await fsp.rename(extracted, executable)
+      } else {
+        await fsp.rename(tempFile, executable)
+      }
+
+      if (process.platform === 'win32') {
+        const isValid = await validWindowsExecutable(executable)
+        if (isValid) {
+          downloaded = true
+          break
+        } else {
+          await fsp.rm(executable, { force: true }).catch(() => {})
+          throw new Error('下载文件校验失败（PE 结构不完整）')
+        }
+      } else {
+        await fsp.chmod(executable, 0o755).catch(() => {})
+        const stat = await fsp.stat(executable).catch(() => null)
+        if (stat?.isFile() && stat.size >= 1024) {
+          downloaded = true
+          break
+        } else {
+          await fsp.rm(executable, { force: true }).catch(() => {})
+          throw new Error('下载文件校验失败（文件大小异常）')
+        }
+      }
+    } catch (err) {
+      lastError = err
+      await fsp.rm(tempFile, { force: true }).catch(() => {})
+    }
+  }
+
+  if (!downloaded) {
+    const binName = path.basename(executable)
+    throw new Error(
+      `cloudflared 下载失败（已尝试加速镜像与官方源）：${lastError?.message || '下载超时或不可用'}。` +
+      `离线方案：您可以访问 https://github.com/cloudflare/cloudflared/releases 下载 ${fileName}，重命名为 ${binName} 后放入：${dir}`
+    )
+  }
+}
+
+
 async function resolveShared(item, parts) {
   const root = await fsp.realpath(item.sourcePath)
   const rootStat = await fsp.stat(root)
@@ -155,6 +313,8 @@ class LocalDrop {
     this.tunnelUrl = null
     this.tunnelError = null
     this.tunnelStarting = false
+    this.tunnelStatusText = null
+    this.tunnelProgress = 0
     this.tunnelPromise = null
     this.tunnelGeneration = 0
   }
@@ -178,7 +338,7 @@ class LocalDrop {
       return publicShare({ ...item, status, size }, true)
     }))
     const { passwordHash, ...settings } = this.state.settings
-    return { settings: { ...settings, hasPassword: !!passwordHash }, shares, running: !!this.server, addresses: addresses(), url: this.server ? `http://${settings.ip}:${settings.port}` : null, tunnel: { running: !!this.tunnel, starting: this.tunnelStarting, url: this.tunnelUrl, error: this.tunnelError } }
+    return { settings: { ...settings, hasPassword: !!passwordHash }, shares, running: !!this.server, addresses: addresses(), url: this.server ? `http://${settings.ip}:${settings.port}` : null, tunnel: { running: !!this.tunnel, starting: this.tunnelStarting, url: this.tunnelUrl, error: this.tunnelError, statusText: this.tunnelStatusText, progress: this.tunnelProgress } }
   }
 
   async createText(name, text) {
@@ -270,33 +430,53 @@ class LocalDrop {
     const generation = ++this.tunnelGeneration
     this.tunnelStarting = true
     this.tunnelError = null
+    this.tunnelStatusText = '正在准备启动公网隧道…'
+    this.tunnelProgress = 0
     this.tunnelPromise = (async () => {
       if (!this.server) await this.start()
-      const cloudflared = this.cloudflaredModule || require('cloudflared')
       const binName = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared'
       const executable = path.join(this.dataDir, 'bin', binName)
       await fsp.mkdir(path.dirname(executable), { recursive: true })
-      if (process.platform === 'win32' && !(await validWindowsExecutable(executable))) {
-        let installed = false
-        let lastInstallError = null
-        for (let attempt = 1; attempt <= 3 && !installed; attempt++) {
-          await fsp.rm(executable, { force: true })
-          try { await cloudflared.install(executable) } catch (error) { lastInstallError = error }
-          installed = await validWindowsExecutable(executable)
-        }
-        if (!installed && lastInstallError) throw new Error(`cloudflared 下载失败：${lastInstallError.message || lastInstallError}`)
-      } else if (!fs.existsSync(executable)) {
-        await cloudflared.install(executable)
+
+      const isWin = process.platform === 'win32'
+      const checkValid = async () => {
+        if (isWin) return validWindowsExecutable(executable)
+        const stat = await fsp.stat(executable).catch(() => null)
+        return !!stat?.isFile() && stat.size >= 1024
       }
+
+      let isValid = await checkValid()
+      if (!isValid) {
+        if (this.cloudflaredModule && typeof this.cloudflaredModule.install === 'function') {
+          let installed = false
+          let lastInstallError = null
+          for (let attempt = 1; attempt <= 3 && !installed; attempt++) {
+            await fsp.rm(executable, { force: true }).catch(() => {})
+            try { await this.cloudflaredModule.install(executable) } catch (error) { lastInstallError = error }
+            installed = await checkValid()
+          }
+          if (!installed && lastInstallError) throw new Error(`cloudflared 下载失败：${lastInstallError.message || lastInstallError}`)
+        } else {
+          this.tunnelStatusText = '正在准备下载公网组件…'
+          this.tunnelProgress = 0
+          await downloadCloudflaredWithMirrors(executable, {
+            onStatus: text => {
+              this.tunnelStatusText = text
+            },
+            onProgress: (percent) => {
+              this.tunnelProgress = percent
+              this.tunnelStatusText = `正在下载公网组件 (${percent}%)…`
+            }
+          })
+        }
+      }
+
       if (generation !== this.tunnelGeneration || !this.server) throw new Error('公网隧道启动已取消')
-      const executableStat = await fsp.stat(executable).catch(() => null)
-      const validExecutable = process.platform === 'win32'
-        ? await validWindowsExecutable(executable)
-        : !!executableStat?.isFile() && executableStat.size >= 1024
+      const validExecutable = await checkValid()
       if (!validExecutable) throw new Error(`cloudflared 二进制下载不完整或与当前系统不兼容，请重试：${executable}`)
-      if (process.platform !== 'win32') await fsp.chmod(executable, 0o755).catch(() => {})
+      if (!isWin) await fsp.chmod(executable, 0o755).catch(() => {})
       const localUrl = `http://${this.state.settings.ip}:${this.state.settings.port}`
-      const args = ['tunnel', '--url', localUrl]
+      const args = ['tunnel', '--url', localUrl, '--protocol', 'http2']
       const spawnOptions = {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
@@ -307,7 +487,7 @@ class LocalDrop {
         const comspec = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe'
         const script = path.join(path.dirname(executable), 'start-tunnel.cmd')
         const quote = value => `"${String(value).replace(/"/g, '""')}"`
-        fs.writeFileSync(script, `@echo off\r\n${quote(executable)} tunnel --url ${quote(localUrl)}\r\n`, { encoding: 'ascii', mode: 0o600 })
+        fs.writeFileSync(script, `@echo off\r\n${quote(executable)} tunnel --url ${quote(localUrl)} --protocol http2\r\n`, { encoding: 'ascii', mode: 0o600 })
         return this.spawnImpl(comspec, ['/d', '/c', 'call', script], spawnOptions)
       }
       const waitForSpawn = (child, allowUnknownFallback) => new Promise((resolve, reject) => {
@@ -350,6 +530,8 @@ class LocalDrop {
       }
       this.tunnel = tunnel
       this.tunnelStarting = true
+      this.tunnelStatusText = '正在分配临时公网域名…'
+      this.tunnelProgress = 100
       const connected = new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('等待 Cloudflare 公网地址超时')), 60_000)
         timeout.unref?.()
@@ -361,6 +543,7 @@ class LocalDrop {
             clearTimeout(timeout)
             this.tunnelUrl = match[0]
             this.tunnelStarting = false
+            this.tunnelStatusText = null
             resolve(match[0])
           }
         }
@@ -374,6 +557,8 @@ class LocalDrop {
             this.tunnel = null
             this.tunnelUrl = null
             this.tunnelStarting = false
+            this.tunnelStatusText = null
+            this.tunnelProgress = 0
             this.tunnelError = code || signal ? `公网隧道已退出（${code ?? signal}）` : '公网隧道已退出'
           }
         })
@@ -382,6 +567,8 @@ class LocalDrop {
         if (this.tunnel === tunnel) {
           this.tunnel = null
           this.tunnelStarting = false
+          this.tunnelStatusText = null
+          this.tunnelProgress = 0
           this.tunnelError = error.message || '公网隧道启动失败'
         }
         tunnel.stop()
@@ -389,7 +576,7 @@ class LocalDrop {
       return connected
     })()
     try { await this.tunnelPromise; return this.snapshot() }
-    catch (error) { this.tunnelStarting = false; this.tunnel = null; this.tunnelUrl = null; this.tunnelError = error.message || '公网隧道启动失败'; throw new Error(this.tunnelError) }
+    catch (error) { this.tunnelStarting = false; this.tunnelStatusText = null; this.tunnelProgress = 0; this.tunnel = null; this.tunnelUrl = null; this.tunnelError = error.message || '公网隧道启动失败'; throw new Error(this.tunnelError) }
     finally { this.tunnelPromise = null }
   }
 
@@ -399,6 +586,8 @@ class LocalDrop {
     this.tunnel = null
     this.tunnelUrl = null
     this.tunnelStarting = false
+    this.tunnelStatusText = null
+    this.tunnelProgress = 0
     this.tunnelError = null
     if (tunnel) {
       try { tunnel.stop() } catch {}
